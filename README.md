@@ -11,7 +11,7 @@ The first and biggest point to note is that you should use the data stored in th
 
 The key files are:
 
-- "EWP_Data_Dictionary_Oct2018.pdf" is the data dictionary. 
+- "Data dictionary 2018_19 (1)" is the data dictionary. 
 
 - The main file of interest is likely "run model". This file takes the latest data and generates forecasts. It allows you to input a vector of base years, from which you would like to generate one and two-year forecasts. The most relevant forecasts have been included in the results folder, generated from base year 2018, predicting outcomes in the next year (2019) and in the next two years (2019 and 2020). Note that if you choose to run the model for base years earlier than 2016, there is some missingness in the data that will prevent you from getting predicted probabilities for all 162 of the countries. 
 
