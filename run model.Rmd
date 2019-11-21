@@ -1,0 +1,583 @@
+---
+title: "SRA 2018-based"
+author: "Julia Levine, Chad Hazlett"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(glmnet)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(reshape2)
+library(knitr)
+# library(rworldmap)
+# library(Hmisc)
+```
+\newpage
+
+#Dataset Documentation
+
+The prepared data-set was built using the following sources:
+
+- [Varieties of Democracy](https://www.v-dem.net/en/data/data-version-9/), which is updated annually. 
+- Polity data 
+- [World Development Indicators](https://datacatalog.worldbank.org/dataset/world-development-indicators), which are updated quarterly. 
+- [Uppsala Conflict Data Program](https://ucdp.uu.se/downloads/), which is updated annually. 
+- [State of the World Report](https://earlywarningproject.ushmm.org/), which is updated annually.
+- [Coup Data](https://www.jonathanmpowell.com/coup-detat-dataset.html): this website contains the most recent updates from Powell and Thyne
+- CIA Factbook, which is updated annually. 
+
+The variables taken from each data-set and notes on missingness are discussed below.
+
+##Varieties of Democracy Data
+
+###Variables
+
+- v2elrstrct - candidate restriction
+- v2psparban_ord - party ban
+- v2psoppaut_ord - barriers to parties
+- v2jureform_ord - judicialreform
+- v2clrelig_ord - religiousfreedom
+- v2xcl_disc - freediscussion
+- v2clkill_ord - political killing approved
+- v2cldmovem_ord - free movement for men
+- v2cldmovew_ord - free movement for women
+- v2clsocgrp_ord - social inequality
+- v2clrgunev_ord - even civil rights
+- v2csreprss_ord - repress civil soc
+- v2pepwrsoc_ord - social power dist
+- v2pepwrsoc_ord - minority rule
+- v2pepwrses - SES power dist
+- e_migdppc - GDP per capita, missing since 2017.Filled in using the WDI.
+- e_migdpgro - GDP per capita growth, missing since 2017. Filled in using the WDI.
+- e_mipopula - population size, missing since 2017. Filled in using the WDI.
+- e_cow_exports - country exports, missing since 2017. Filled in using the WDI.
+- e_cow_imports- country imports, missing since 2017. Filled in using the WDI.
+
+###Notes
+
+The following variables have not been updated since 2016: e_migdppc, e_mgdpgro, e_mipopula, e_cow_exports, and e_cow_imports. These have been filled in using the WDI data. 
+
+##Polity
+
+###Variables
+
+- polity2, used to create "polity2.fl.2", and "polity2.fl.3"
+- durable
+
+###Notes
+
+We receive this annually from Monty Marshall, but due to delays on the 2018 updates, we have carried forward each country's 2017 values for polity2. The durable variable is updated by adding 1 to the last years value for each country. 
+
+##World Development Indicators
+
+###Variables
+
+- NE.TRD.GNFS.ZS - Trade (% of GDP)
+- NY.GDP.PCAP.PP.KD - GDP per capita, PPP (constant 2005 intl $)
+- NY.GDP.PCAP.KD - GDP per capita (constant 2000 US$)
+- NY.GDP.MKTP.KD.ZG - GDP growth (annual %)
+- FP.CPI.TOTL.ZG - Inflation, consumer prices (annual %)
+- SP.POP.TOTL- Population, total
+- SP.DYN.IMRT.IN - Infant mortality rate
+
+###Notes
+
+Infant mortality rate has not yet been updated for 2018 (as of 7/1/19), so these values have been carried forward from 2017. However, because the infant mortality rate data was not updated at the time of building the 2016-2017 data-set, these values are actually carried forward from 2015. Data are now available for 2016 and 2017 if we wished to update that, however, it may change our forecasts. 
+
+##Uppsala Conflict Data Program
+
+###Variables
+
+- battle-deaths
+
+###Notes
+
+- In previous years, we only took the last battle-death observation in a year for each country. In these updates, we sum the total number of battle-deaths each year for each country.
+- We also take conflict types 3 and 4 (internal and internationalized internal), where in previous years, we also included conflict types 2 (interstate) from UCDP. 
+
+##State of the World Report
+
+This annual report published on the EWP website is used to update data on mass killings, state-led, and non state-led. 
+
+###Variables
+
+- anymk.start.1
+- anymk.start.2window
+- anymk.ongoing
+- anymk.ever
+
+###Notes
+
+The only update is the ending of the Sudan event, backdated to end in 2016.
+
+##Coup Data
+
+###Variables
+
+- coup.try.5yr - indicator variable for whether a coup was attempted within the last five years
+
+###Notes
+
+There were no new coups in 2018, but Gabon and Sudan both had coups in 2019.
+
+##CIA Factbook
+
+The CIA Factbook is used to fill in data on population size, trade-share, and GDP per capita growth. Because the CIA Factbook has not been updated for 2018, countries that were missing these variables have been filled in with their 2017 values. This is a temporary fix until the CIA Factbook is updated later in 2019. 
+
+\newpage
+
+#Running the Model 
+
+```{r}
+
+outcomenames <- c("anymk.start.1", "anymk.start.2window")
+
+# Note change to anymk.ongoing and anymk.ever (from mkl.ongoing and mkl.ever)
+predictornames <- c("anymk.ongoing","anymk.ever",
+                    "reg.afr", "reg.eap", "reg.eur", "reg.mna", "reg.sca", 
+                    "countryage.ln", "popsize.ln.combined", "imr.sqrt", 
+                    "gdppcgrowth.combined", "ios.iccpr1","includesnonstate",
+                    "durable.ln","minorityrule", "elf.ethnic", "battledeaths.ln",
+                    "candidaterestriction", "partyban","judicialreform",
+                    "religiousfreedom", "pol_killing_approved",
+                    "freemove_men4","freemove_women4", "freediscussion",
+                    "social_inequality","even_civilrights","repress_civilsoc",
+                    "social_power_dist", "ses_power_dist","tradeshare.ln.combined",
+                    "coup.try.5yr",
+                    "polity2.fl.2","polity2.fl.3")
+```
+
+
+
+
+
+```{r}
+
+# function to create training and test datasets for each base year
+create_datasets <- function(dat, base_year = "2017"){
+  foo <- subset(dat, select = c("sftgcode","year", outcomenames, 
+                                predictornames, "country_name","year"))
+  
+  keep <- as.integer(base_year) - 2
+  ### Train on all, though 2016 drops 
+
+
+  yXtrain <- na.omit(foo) #drops years with NA any.mk variables
+  yXtrain <- yXtrain[year <= keep]
+
+  Xtrain <- subset(yXtrain, select = predictornames)
+  ytrain_1yr <- subset(yXtrain, select = outcomenames[1]) #single leaded year outcome
+  ytrain_2yr <- subset(yXtrain, select = outcomenames[2]) # two year window outcome
+
+  # Prediction time data:
+  Xtest <- na.omit(subset(dat[year == as.integer(base_year)], 
+       select =  c("sftgcode", "COWcode", predictornames, "country_name","year")))
+  out <- list(Xtest, Xtrain, ytrain_1yr, ytrain_2yr)
+  names(out) <- c("Xtest", "Xtrain", "ytrain_1yr", "ytrain_2yr")
+  out
+}
+```
+
+```{r}
+# function to run model 
+model <- function(ytrain, Xtrain, Xtest, alpha = .5){
+  
+  elastic.cv <- cv.glmnet(y=unlist(ytrain),  
+                                 x=as.matrix(subset(Xtrain, 
+                                                    select = predictornames)), 
+                                 alpha=alpha, family="binomial")
+  coeffs <- coef(elastic.cv, s = "lambda.min")
+
+  elastic.predictions = signif(predict.cv.glmnet(elastic.cv, 
+        newx=as.matrix(subset(Xtest, select = predictornames)), 
+        s="lambda.min", type="response"),4)
+
+  risk <- as.numeric(elastic.predictions)
+  out <- list(risk, coeffs, elastic.cv)
+  out
+}
+```
+
+```{r}
+
+
+# function to format results, model embedded
+format_results <- function(dat, base_year){
+  dat_list <- create_datasets(dat, base_year = base_year)
+  list2env(dat_list, .GlobalEnv)
+  
+  set.seed(123)
+  risk.1yr <- model(ytrain = ytrain_1yr, Xtrain = Xtrain, Xtest = Xtest)
+  set.seed(123)
+  risk.2yr <- model(ytrain = ytrain_2yr, Xtrain = Xtrain, Xtest = Xtest)
+
+  coeffs1 <- as.data.frame(as.matrix(risk.1yr[[2]]))
+  coeffs1$vars <- rownames(coeffs1)
+  coeffs2 <- as.data.frame(as.matrix(risk.2yr[[2]]))
+  coeffs2$vars <- rownames(coeffs2)
+  coeffs <- merge(coeffs1, coeffs2, by = "vars")
+  colnames(coeffs) <- c("Variables", "Weights for 1-year forecast", "Weights for 2-year forecast")
+  
+  Xtest$risk.1yr <- risk.1yr[[1]]
+  Xtest$risk.2yr <- risk.2yr[[1]]
+  
+  everything <- subset(Xtest,
+                       select = c("country_name", "sftgcode", "COWcode", 
+                                  "risk.1yr", "risk.2yr", predictornames))
+  everything <- everything[order(everything$risk.1yr, decreasing = TRUE), ] 
+  
+  pred1 <- paste0("risk_in_", as.integer(base_year) + 1)
+  pred2 <- paste(paste0("risk_in_", as.integer(base_year) + 1), 
+                 substr(as.integer(base_year) + 2, 3, 4), sep = "_")
+  
+  colnames(everything)=c("country","SFTGcode","COW",pred1, pred2, predictornames)
+  
+  #including the cv.glment object
+  cv.glmnet.2yr <- risk.2yr[[3]]
+  
+  out <- list(everything, coeffs, cv.glmnet.2yr)
+  out
+}
+```
+
+```{r, eval = FALSE}
+load("prepared2018predictors_9_19_19.RData")
+dat <- as.data.table(dat)
+
+# run the model and save the output
+# base_years <- c("2016", "2017", "2018")
+base_years <- "2015"
+results <- lapply(base_years, 
+                  function(x) format_results(dat = dat, base_year = x))
+names(results) <- paste0("base", base_years)
+list2env(results, .GlobalEnv)
+
+
+for(i in 1:length(results)){
+  write.csv(results[[i]][1], paste("results/", names(results)[i], "-run-", 
+                       Sys.Date(),".csv" , sep = ""), 
+            row.names = FALSE)
+}
+
+for(i in 1:length(results)){
+  write.csv(results[[i]][2], paste("results/", names(results)[i], "-coeffs-run-", 
+                       Sys.Date(),".csv" , sep = ""), 
+            row.names = FALSE)
+}
+
+for(i in 1:length(results)){
+    cv.glmnet <- results[[i]][[3]]
+  save(cv.glmnet, predictornames, file=paste("results/", names(results)[i], "-cv.glmnet-", 
+                       Sys.Date(),".Rdata" , sep = ""))
+}
+
+
+```
+
+
+
+
+```{r, eval = FALSE}
+# runs the model on old data
+
+load("prepared2017predictors_15Oct2018.RData")
+dat <- as.data.table(dat)
+
+# run the model and save the output
+base_years <- c("2016", "2017")
+results <- lapply(base_years, 
+                  function(x) format_results(dat = dat, base_year = x))
+names(results) <- paste0("base", base_years)
+list2env(results, .GlobalEnv)
+
+
+for(i in 1:length(results)){
+  write.csv(results[[i]][1], paste("results/", names(results)[i], "-original-data-run-", 
+                       Sys.Date(),".csv" , sep = ""), 
+            row.names = FALSE)
+}
+
+for(i in 1:length(results)){
+  write.csv(results[[i]][2], paste("results/originals/", names(results)[i],
+                                   "-coeffs-original-data-run-", 
+                       Sys.Date(),".csv" , sep = ""), 
+            row.names = FALSE)
+}
+```
+
+
+
+\newpage
+
+#Results
+
+The results presented here include forecasts predicted from the years 2016, 2017, and 2018. These are the results from the same model, but trained only up to the appropriate $t-2$: 2014, 2015, and 2016 respectively. 
+
+```{r, echo = FALSE}
+base_2016 <- read.csv("results/base2016-run-2019-09-19.csv")
+base_2017 <- read.csv("results/base2017-run-2019-09-19.csv")
+base_2018 <- read.csv("results/base2018-run-2019-09-19.csv")
+
+```
+
+
+
+
+
+##Comparing 1-year forecasts made from 2017 and from 2018
+
+```{r, echo = FALSE}
+rank16 <- base_2016$country[order(base_2016$risk_in_2017, decreasing = TRUE)]
+rank17 <- base_2017$country[order(base_2017$risk_in_2018, decreasing = TRUE)]
+rank18 <- base_2018$country[order(base_2018$risk_in_2019, decreasing = TRUE)]
+ind <- c(1:length(rank16))
+
+ranks <- data.frame(rank16, rank17, rank18, ind)
+kable(ranks[1:10, ], caption = "Countries most likely to have a mass killing in the next year", col.names = c("2016-based forecast", "2017-based forecast", "2018-based forecast", "ranks"))
+```
+
+```{r, echo=FALSE}
+n <- 20
+
+sub_cast <- base_2018[order(base_2018$risk_in_2019, decreasing = TRUE), ]
+sub_cast$country <- as.character(sub_cast$country)
+sub_cast <- sub_cast[1:n, ]
+sub_cast <- merge(sub_cast, base_2017[, c("risk_in_2018", "country")], by = "country", all.x = TRUE)
+
+
+sub_cast_sm <- as.data.table(sub_cast[order(sub_cast$risk_in_2019, decreasing = TRUE), c("country", "risk_in_2019", "risk_in_2018")])
+sub_cast_sm_l <- melt(sub_cast_sm, id.vars = "country")
+
+ggplot(sub_cast_sm_l, aes(x = rep(1:n, 2), y = value))  + 
+  geom_point(aes(color = variable))+ 
+  geom_path(aes(group = country), 
+            arrow = arrow(length=unit(0.15,"cm"), ends="first", type = "closed"))  + 
+  theme_classic() + 
+  scale_x_discrete(name ="Country",limits=sub_cast_sm$country)+ 
+  theme(axis.text.x = element_text(angle = 45,hjust=0.95,vjust=1)) + 
+  labs(y = "Risk of Mass Killing Event in 1 Year", color = "Forecast\nbase year") + 
+  scale_color_discrete(labels = c("2018", "2017")) + ggtitle("Comparing one-year forecasts made from 2017 and from 2018")
+```
+
+```{r, echo = FALSE}
+coeffs_2017 <- read.csv("results/base2017-coeffs-run-2019-09-19.csv")
+coeffs_2017$base_year <- "2017"
+coeffs_2018 <- read.csv("results/base2018-coeffs-run-2019-09-19.csv")
+coeffs_2018$base_year <- "2018"
+
+coeffs <- rbind(coeffs_2017, coeffs_2018)
+
+vars_17 <- coeffs$Variables[coeffs$Weights.for.1.year.forecast!=0 & 
+                              coeffs$base_year == "2017"]
+vars_18 <- coeffs$Variables[coeffs$Weights.for.1.year.forecast!=0 & 
+                              coeffs$base_year == "2018"]
+
+setdiff(vars_17, vars_18)
+setdiff(vars_18, vars_17)
+
+keep <- union(vars_17, vars_18)
+
+coeffs.1 <- coeffs[coeffs$Variables %in% keep, 
+                   c("Weights.for.1.year.forecast", "base_year", "Variables")]
+coeffs.1 <- coeffs.1[coeffs.1$Variables != "(Intercept)", ]
+```
+
+
+
+
+Polity2.fl.3 was selected as a predictor in 2018, but not 2017. Predictors with coefficients of 0 are represented by "NA".
+
+
+```{r, echo = FALSE}
+var_length <- max(nrow(coeffs.1[coeffs.1$base_year == 2017,]), 
+                  nrow(coeffs.1[coeffs.1$base_year == 2018,]))
+
+ggplot(coeffs.1,
+       aes(x = rep(1:var_length, 2), y = Weights.for.1.year.forecast)) +
+  geom_point(aes(color = base_year))  +
+  geom_path(aes(group = Variables),
+            arrow = arrow(length=unit(0.15,"cm"), ends="last", type = "closed"))+
+  theme_classic() +
+  scale_x_discrete(name ="Predictors",limits=coeffs.1$Variables[1:var_length])+
+  theme(axis.text.x = element_text(angle = 45,hjust=0.95,vjust=1)) +
+  labs(y = "Coefficients for 1-year forecast",
+       color = "Forecast\nbase year") +
+  ggtitle("Comparing coefficients for 2017 and 2018-based 1-year forecasts")
+```
+
+
+
+```{r, echo = FALSE}
+coeffs1 <- as.data.table(coeffs[, c("Variables", "Weights.for.1.year.forecast", "base_year")])
+coeffs1$Weights.for.1.year.forecast[coeffs1$Weights.for.1.year.forecast == 0] <- NA
+
+coeffs1_w <- dcast(coeffs1, Variables ~ base_year, value.var = "Weights.for.1.year.forecast")
+# kable(coeffs1_w, digits = 2, col.names = c("Predictors", "2017-based forecast", "2018-based forecast"), caption = "Coefficients")
+```
+
+\newpage
+
+##Comparing 2-year forecasts made from 2017 and from 2018
+
+```{r, echo = FALSE}
+# next two years
+
+rank16 <- base_2016$country[order(base_2016$risk_in_2017_18, decreasing = TRUE)]
+rank17 <- base_2017$country[order(base_2017$risk_in_2018_19, decreasing = TRUE)]
+rank18 <- base_2018$country[order(base_2018$risk_in_2019_20, decreasing = TRUE)]
+ind <- c(1:length(rank16))
+
+ranks <- data.frame(rank16, rank17, rank18, ind)
+kable(ranks[1:10, ], caption = "Countries most likely to have a mass killing in the next two years", col.names = c("2016-based forecast", "2017-based forecast", "2018-based forecast", "ranks"))
+```
+
+
+```{r, echo=FALSE}
+n <- 20
+
+sub_cast <- base_2018[order(base_2018$risk_in_2019_20, decreasing = TRUE), ]
+sub_cast$country <- as.character(sub_cast$country)
+sub_cast <- sub_cast[1:n, ]
+sub_cast <- merge(sub_cast, base_2017[, c("risk_in_2018_19", "country")], by = "country", all.x = TRUE)
+
+sub_cast_sm <- as.data.table(sub_cast[order(sub_cast$risk_in_2019_20, decreasing = TRUE), c("country", "risk_in_2019_20", "risk_in_2018_19")])
+sub_cast_sm_l <- melt(sub_cast_sm, id.vars = "country")
+
+ggplot(sub_cast_sm_l, aes(x = rep(1:n, 2), y = value)) + 
+  geom_point(aes(x = rep(1:n, 2), y = value, color = variable))  + 
+  geom_path(aes(group = country), 
+            arrow = arrow(length=unit(0.15,"cm"), ends="first", type = "closed")) + 
+  theme_classic() + 
+  scale_x_discrete(name ="Country",limits=sub_cast_sm$country)+ 
+  theme(axis.text.x = element_text(angle = 45,hjust=0.95,vjust=1)) + 
+  labs(y = "Risk of Mass Killing Event in 2 years", color = "Forecast\nbase year") + 
+  scale_color_discrete(labels = c("2018", "2017")) + ggtitle("Comparing two-year forecasts made from 2017 and from 2018")
+```
+
+
+```{r, echo = FALSE}
+vars_17 <- coeffs$Variables[coeffs$Weights.for.2.year.forecast!=0 & 
+                              coeffs$base_year == "2017"]
+vars_18 <- coeffs$Variables[coeffs$Weights.for.2.year.forecast!=0 & 
+                              coeffs$base_year == "2018"]
+
+setdiff(vars_17, vars_18)
+setdiff(vars_18, vars_17)
+
+keep <- union(vars_17, vars_18)
+
+coeffs.2 <- coeffs[coeffs$Variables %in% keep, 
+                   c("Weights.for.2.year.forecast", "base_year", "Variables")]
+coeffs.2 <- coeffs.2[coeffs.2$Variables != "(Intercept)", ]
+```
+
+All variables that were selected in the 2017 model were selected in the 2018 model. In addition to the original selected predicters, the new model also selected "gdppcgrowth.combined", and "social_power_dist". 
+<!-- the new model also selected "gdppcgrowth.combined", and "religiousfreedom".  -->
+
+```{r, echo = FALSE}
+var_length <- max(nrow(coeffs.2[coeffs.2$base_year == 2017,]), 
+                  nrow(coeffs.2[coeffs.2$base_year == 2018,]))
+ggplot(coeffs.2, 
+       aes(x = rep(1:var_length, 2), y = Weights.for.2.year.forecast)) + 
+  geom_point(aes(color = base_year))  + 
+  geom_path(aes(group = Variables), 
+            arrow = arrow(length=unit(0.15,"cm"), ends="last", type = "closed"))+ 
+  theme_classic() + 
+  scale_x_discrete(name ="Predictors",limits=coeffs.2$Variables[1:var_length])+ 
+  theme(axis.text.x = element_text(angle = 45,hjust=0.95,vjust=1)) + 
+  labs(y = "Coefficients for 2-year forecast", 
+       color = "Forecast\nbase year") + 
+  ggtitle("Comparing Coefficients for 2017 and 2018-based 2-year forecasts") 
+```
+
+```{r, echo = FALSE}
+coeffs2 <- as.data.table(coeffs[, c("Variables", "Weights.for.2.year.forecast", "base_year")])
+coeffs2$Weights.for.2.year.forecast[coeffs2$Weights.for.2.year.forecast == 0] <- NA
+
+coeffs2_w <- dcast(coeffs2, Variables ~ base_year, value.var = "Weights.for.2.year.forecast")
+kable(coeffs2_w, digits = 2, col.names = c("Predictors", "2017-based forecast", "2018-based forecast"), caption = "Coefficients")
+
+```
+
+##Heatmaps
+
+
+\clearpage
+
+
+<!-- ![Heatmap of Risk of Mass Killing within 2 years]("heatmap_temp") -->
+
+
+
+<!-- ![Scaled Heatmap of Mass Killing within 2 years]("heatmap_temp_scaled") -->
+
+
+<!-- Only run the following if results have changed: -->
+
+```{r, eval = FALSE, echo = FALSE}
+newcast <-  base_2018
+newcast$country <- as.character(newcast$country)
+### MAPS ###
+# Change a few country names to match ones used in rworldmap
+
+newcast$country[newcast$country=="Republic of the Congo"] = "Congo"
+newcast$country[newcast$SFTGcode=="MYA"] = "Myanmar"
+newcast$country[newcast$country=="Democratic Republic of Vietnam"] = "Vietnam"
+
+# Join data to map
+map2018based <- joinCountryData2Map(newcast,
+                                    nameJoinColumn = "country",
+                                    joinCode = "NAME",
+                                    verbose = TRUE)
+# verbose = TRUE shows you whether all countries were succesfully merged
+```
+
+
+```{r, eval = FALSE, echo = FALSE}
+# Map the scores
+png("heatmap_temp.png", width=800, height=450, bg="white")
+par(mai=c(0,0,0.2,0),xaxs="i",yaxs="i")
+map.score <- mapCountryData(map2018based,
+                            nameColumnToPlot="risk_in_2019_20",
+                            addLegend = TRUE,
+                            numCats = 5, catMethod="logFixedWidth",
+                            colourPalette = "heat",
+                            borderCol = "gray",
+                            mapTitle = "Risk of Onset of Mass Killing Episode")
+dev.off()
+
+
+# do.call(addMapLegend, c(map.score, legendWidth=0.5, legendMar = 2))
+# mtext("map made using rworldmap             ", line=-4, side=1, adj=1, cex=0.8)
+
+fillcols=c("lightgoldenrod", "yellow", "orange", "orangered", "orangered4")
+
+png("heatmap_temp_scaled.png", width=800, height=450, bg="white")
+par(mai=c(0,0,0.2,0), xaxs="i", yaxs="i")
+map.score <- mapCountryData(map2018based,
+                            nameColumnToPlot = "risk_in_2019_20",
+                            addLegend = FALSE,
+                            catMethod = 2*c(0,0.01,0.02,0.04,0.08,0.16),
+                            colourPalette = fillcols,
+                            borderCol = "white",
+                            oceanCol = "lightblue",
+                            mapTitle = "")
+legend(x = -170, y = -85, xjust = 0, yjust = 0,
+       legend = c("<2%", "2-4%", "4-8%", "8-16%", ">16%"),
+       fill = fillcols, border = "white", bty = "n")
+dev.off()
+```
+
+
+```{r, eval = F}
+data <- fread("results/base2018-run-2019-09-19.csv")
+data <- data[order(data$risk_in_2019_20, decreasing = T), ]
+subset(data, select = c("country", "risk_in_2019_20"))
+```
+
