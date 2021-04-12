@@ -194,7 +194,7 @@ model <- function(ytrain, Xtrain, Xtest, alpha = .5){
                                  alpha=alpha, family="binomial")
   coeffs <- coef(elastic.cv, s = "lambda.min")
 
-  elastic.predictions = signif(predict.cv.glmnet(elastic.cv, 
+  elastic.predictions = signif(predict(elastic.cv, 
         newx=as.matrix(subset(Xtest, select = predictornames)), 
         s="lambda.min", type="response"),4)
 
@@ -247,7 +247,11 @@ format_results <- function(dat, base_year){
 ```
 
 ```{r, eval = FALSE}
-load("prepared2018predictors_9_19_19.RData")
+filepaths <- list.files("prepared data")
+filepath17 <- filepaths[grepl("prepared2017predictors_", filepaths)]
+filepath18 <- filepaths[grepl("prepared2018predictors_", filepaths)]
+
+load(paste("prepared data", filepath18, sep = "/"))
 dat <- as.data.table(dat)
 
 # run the model and save the output
@@ -286,7 +290,8 @@ for(i in 1:length(results)){
 ```{r, eval = FALSE}
 # runs the model on old data
 
-load("prepared2017predictors_15Oct2018.RData")
+
+load(paste("prepared data", filepath17, sep = "/"))
 dat <- as.data.table(dat)
 
 # run the model and save the output
@@ -572,12 +577,5 @@ legend(x = -170, y = -85, xjust = 0, yjust = 0,
        legend = c("<2%", "2-4%", "4-8%", "8-16%", ">16%"),
        fill = fillcols, border = "white", bty = "n")
 dev.off()
-```
-
-
-```{r, eval = F}
-data <- fread("results/base2018-run-2019-09-19.csv")
-data <- data[order(data$risk_in_2019_20, decreasing = T), ]
-subset(data, select = c("country", "risk_in_2019_20"))
 ```
 
