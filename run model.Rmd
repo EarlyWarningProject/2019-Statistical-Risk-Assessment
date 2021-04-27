@@ -289,7 +289,9 @@ for(i in 1:length(results)){
 
 ```{r, eval = FALSE}
 # runs the model on old data
-
+if(!dir.exists("results/originals")){
+  dir.create("results/originals")
+}
 
 load(paste("prepared data", filepath17, sep = "/"))
 dat <- as.data.table(dat)
@@ -303,7 +305,7 @@ list2env(results, .GlobalEnv)
 
 
 for(i in 1:length(results)){
-  write.csv(results[[i]][1], paste("results/", names(results)[i], "-original-data-run-", 
+  write.csv(results[[i]][1], paste("results/originals/", names(results)[i], "-original-data-run-", 
                        Sys.Date(),".csv" , sep = ""), 
             row.names = FALSE)
 }
